@@ -10,6 +10,7 @@ import (
 	"io/ioutil"
 	"net/mail"
 	"path/filepath"
+	"strings"
 )
 
 /* Attachment: attach files */
@@ -69,4 +70,54 @@ func (m *Message) addCC(address mail.Address) []string {
 func (m *Message) addBcc(address mail.Address) []string {
 	m.Bcc = append(m.Bcc, address.String())
 	return m.Bcc
+}
+
+func (m *Message) Attach(file string) error {
+	return m.attach(file, false)
+}
+
+func (m *Message) Inline(file string) error {
+	return m.attach(file, true)
+}
+
+func (m *Message) addHeader(key string, value string) Header {
+	newHeader := Header{Key: key, Value: value}
+	m.Headers = append(m.Headers, newHeader)
+	return newHeader
+}
+
+func newMessage(subject string, body string, bodyContentType string) *Message {
+	m := &Message{Subject: subject, Body: body, BodyContentType: bodyContentType}
+	m.Attachments = make(map[string]*Attachment)
+
+	return m
+}
+
+func NewMessage(subject string, body string) *Message {
+	return newMessage(subject, body, "text/plain")
+}
+
+func NewHTMLMessage(subject string, body string) *Message {
+	return newMessage(subject, body, "text/html")
+}
+
+func (m *Message) Tolist() []string {
+	rcptList := []string{}
+
+	toList, _ := mail.ParseAddressList(strings.Join(m.To, ","))
+	for _, to := range toList {
+		rcptList = append(rcptList, to.Address)
+	}
+
+	ccList, _ := mail.ParseAddressList(strings.Join(m.Cc, ","))
+	for _, cc := range ccList {
+		rcptList = append(rcptList, cc.Address)
+	}
+
+	bccList, _ := mail.ParseAddressList(strings.Join(m.Bcc, ","))
+	for _, bcc := range bccList {
+		rcptList = append(rcptList, bcc.Address)
+	}
+
+	return rcptList
 }
