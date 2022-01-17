@@ -7,31 +7,33 @@
 package goemail
 
 import (
+	"bytes"
+	"encoding/base64"
+	"fmt"
 	"io/ioutil"
+	"mime"
 	"net/mail"
 	"net/smtp"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
-/* Attachment: attach files */
 type Attachment struct {
 	Filename string
 	Data     []byte
 	Inline   bool
 }
 
-/* Header: an additional email header */
 type Header struct {
 	Key   string
 	Value string
 }
 
-/* Message: From, To, ReplyTo, Subject, Body, Attachments... */
 type Message struct {
 	From            mail.Address
 	To              []string
-	CC              []string
+	Cc              []string
 	Bcc             []string
 	ReplyTo         string
 	Subject         string
@@ -58,19 +60,28 @@ func (m *Message) attach(file string, inline bool) error {
 	return nil
 }
 
-func (m *Message) addTo(address mail.Address) []string {
+func (m *Message) AddTo(address mail.Address) []string {
 	m.To = append(m.To, address.String())
 	return m.To
 }
 
-func (m *Message) addCC(address mail.Address) []string {
-	m.CC = append(m.CC, address.String())
-	return m.CC
+func (m *Message) AddCc(address mail.Address) []string {
+	m.Cc = append(m.Cc, address.String())
+	return m.Cc
 }
 
-func (m *Message) addBcc(address mail.Address) []string {
+func (m *Message) AddBcc(address mail.Address) []string {
 	m.Bcc = append(m.Bcc, address.String())
 	return m.Bcc
+}
+
+func (m *Message) AttachBuffer(filename string, buf []byte, inline bool) error {
+	m.Attachments[filename] = &Attachment{
+		Filename: filename,
+		Data:     buf,
+		Inline:   inline,
+	}
+	return nil
 }
 
 func (m *Message) Attach(file string) error {
@@ -81,7 +92,7 @@ func (m *Message) Inline(file string) error {
 	return m.attach(file, true)
 }
 
-func (m *Message) addHeader(key string, value string) Header {
+func (m *Message) AddHeader(key string, value string) Header {
 	newHeader := Header{Key: key, Value: value}
 	m.Headers = append(m.Headers, newHeader)
 	return newHeader
@@ -89,6 +100,7 @@ func (m *Message) addHeader(key string, value string) Header {
 
 func newMessage(subject string, body string, bodyContentType string) *Message {
 	m := &Message{Subject: subject, Body: body, BodyContentType: bodyContentType}
+
 	m.Attachments = make(map[string]*Attachment)
 
 	return m
@@ -110,7 +122,7 @@ func (m *Message) Tolist() []string {
 		rcptList = append(rcptList, to.Address)
 	}
 
-	ccList, _ := mail.ParseAddressList(strings.Join(m.CC, ","))
+	ccList, _ := mail.ParseAddressList(strings.Join(m.Cc, ","))
 	for _, cc := range ccList {
 		rcptList = append(rcptList, cc.Address)
 	}
@@ -123,6 +135,90 @@ func (m *Message) Tolist() []string {
 	return rcptList
 }
 
+func (m *Message) Bytes() []byte {
+	buf := bytes.NewBuffer(nil)
+
+	buf.WriteString("From: " + m.From.String() + "\r\n")
+
+	t := time.Now()
+	buf.WriteString("Date: " + t.Format(time.RFC1123Z) + "\r\n")
+
+	buf.WriteString("To: " + strings.Join(m.To, ",") + "\r\n")
+	if len(m.Cc) > 0 {
+		buf.WriteString("Cc: " + strings.Join(m.Cc, ",") + "\r\n")
+	}
+
+	var coder = base64.StdEncoding
+	var subject = "=?UTF-8?B?" + coder.EncodeToString([]byte(m.Subject)) + "?="
+	buf.WriteString("Subject: " + subject + "\r\n")
+
+	if len(m.ReplyTo) > 0 {
+		buf.WriteString("Reply-To: " + m.ReplyTo + "\r\n")
+	}
+
+	buf.WriteString("MIME-Version: 1.0\r\n")
+
+	if len(m.Headers) > 0 {
+		for _, header := range m.Headers {
+			buf.WriteString(fmt.Sprintf("%s: %s\r\n", header.Key, header.Value))
+		}
+	}
+
+	boundary := "f46d043c813270fc6b04c2d223da"
+
+	if len(m.Attachments) > 0 {
+		buf.WriteString("Content-Type: multipart/mixed; boundary=" + boundary + "\r\n")
+		buf.WriteString("\r\n--" + boundary + "\r\n")
+	}
+
+	buf.WriteString(fmt.Sprintf("Content-Type: %s; charset=utf-8\r\n\r\n", m.BodyContentType))
+	buf.WriteString(m.Body)
+	buf.WriteString("\r\n")
+
+	if len(m.Attachments) > 0 {
+		for _, attachment := range m.Attachments {
+			buf.WriteString("\r\n\r\n--" + boundary + "\r\n")
+
+			if attachment.Inline {
+				buf.WriteString("Content-Type: message/rfc822\r\n")
+				buf.WriteString("Content-Disposition: inline; filename=\"" + attachment.Filename + "\"\r\n\r\n")
+
+				buf.Write(attachment.Data)
+			} else {
+				ext := filepath.Ext(attachment.Filename)
+				mimetype := mime.TypeByExtension(ext)
+				if mimetype != "" {
+					mime := fmt.Sprintf("Content-Type: %s\r\n", mimetype)
+					buf.WriteString(mime)
+				} else {
+					buf.WriteString("Content-Type: application/octet-stream\r\n")
+				}
+				buf.WriteString("Content-Transfer-Encoding: base64\r\n")
+
+				buf.WriteString("Content-Disposition: attachment; filename=\"=?UTF-8?B?")
+				buf.WriteString(coder.EncodeToString([]byte(attachment.Filename)))
+				buf.WriteString("?=\"\r\n\r\n")
+
+				b := make([]byte, base64.StdEncoding.EncodedLen(len(attachment.Data)))
+				base64.StdEncoding.Encode(b, attachment.Data)
+
+				for i, l := 0, len(b); i < l; i++ {
+					buf.WriteByte(b[i])
+					if (i+1)%76 == 0 {
+						buf.WriteString("\r\n")
+					}
+				}
+			}
+
+			buf.WriteString("\r\n--" + boundary)
+		}
+
+		buf.WriteString("--")
+	}
+
+	return buf.Bytes()
+}
+
 func Send(addr string, auth smtp.Auth, m *Message) error {
-	return smtp.SendMail(addr, auth, m.From.Address, m.Tolist())
+	return smtp.SendMail(addr, auth, m.From.Address, m.Tolist(), m.Bytes())
 }
