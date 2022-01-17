@@ -9,6 +9,7 @@ package goemail
 import (
 	"io/ioutil"
 	"net/mail"
+	"net/smtp"
 	"path/filepath"
 	"strings"
 )
@@ -109,7 +110,7 @@ func (m *Message) Tolist() []string {
 		rcptList = append(rcptList, to.Address)
 	}
 
-	ccList, _ := mail.ParseAddressList(strings.Join(m.Cc, ","))
+	ccList, _ := mail.ParseAddressList(strings.Join(m.CC, ","))
 	for _, cc := range ccList {
 		rcptList = append(rcptList, cc.Address)
 	}
@@ -120,4 +121,8 @@ func (m *Message) Tolist() []string {
 	}
 
 	return rcptList
+}
+
+func Send(addr string, auth smtp.Auth, m *Message) error {
+	return smtp.SendMail(addr, auth, m.From.Address, m.Tolist())
 }
