@@ -59,22 +59,32 @@ func (m *Message) attach(file string, inline bool) error {
 
 	return nil
 }
+/*
+	Method: AddContactInformation
+	
+	Append contact information to 'To', 'Bcc' or 'Cc' 
+	
+	address -> address contact <mail.Address>
+	atribute -> which section will be updated
 
-func (m *Message) AddTo(address mail.Address) []string {
-	m.To = append(m.To, address.String())
-	return m.To
+	returns the list of addresses which has been updated
+
+*/
+func (m *Message) AddContactInformation (address mail.Address, atribute string) []string {
+	switch strings.ToLower(atribute) {
+		case "to":
+			m.To = append(m.To, address.String())
+			return m.To
+		case "bcc":
+			m.Bcc = append(m.Bcc, address.String())
+			return m.Bcc
+		case "cc":
+			m.Cc = append(m.Cc, address.String())
+			return m.Cc
+		default:
+			return nil
+	}
 }
-
-func (m *Message) AddCc(address mail.Address) []string {
-	m.Cc = append(m.Cc, address.String())
-	return m.Cc
-}
-
-func (m *Message) AddBcc(address mail.Address) []string {
-	m.Bcc = append(m.Bcc, address.String())
-	return m.Bcc
-}
-
 func (m *Message) AttachBuffer(filename string, buf []byte, inline bool) error {
 	m.Attachments[filename] = &Attachment{
 		Filename: filename,
